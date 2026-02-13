@@ -1,0 +1,579 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// AUTH MODELS (NextAuth.js)
+// ============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  focusProviderId String?       // "My Company" for competitive framing
+
+  accounts       Account[]
+  sessions       Session[]
+  llmSettings    UserLLMSettings?
+  comparisonSets ComparisonSet[]
+  refreshJobs    RefreshJob[]
+  storedInsights StoredInsight[]
+  focusProvider  Provider?      @relation("UserFocusProvider", fields: [focusProviderId], references: [id])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============================================================================
+// USER LLM SETTINGS
+// ============================================================================
+
+enum LLMProviderType {
+  OPENAI
+  ANTHROPIC
+  GEMINI
+  OPENAI_COMPATIBLE
+}
+
+model UserLLMSettings {
+  id               String          @id @default(cuid())
+  userId           String          @unique
+  providerType     LLMProviderType @default(OPENAI)
+  encryptedApiKey  String?         @db.Text
+  modelDefault     String          @default("gpt-4-turbo-preview")
+  baseUrl          String?         // For OpenAI-compatible endpoints
+  validationStatus String          @default("pending") // pending, valid, invalid
+  lastValidatedAt  DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================================
+// SHARED APPLICATION SETTINGS (singleton – id is always "global")
+// ============================================================================
+
+model AppSettings {
+  id               String          @id @default("global")
+
+  // LLM configuration (shared across all users)
+  providerType     LLMProviderType @default(OPENAI)
+  encryptedApiKey  String?         @db.Text
+  modelDefault     String          @default("gpt-4-turbo-preview")
+  baseUrl          String?         // For OpenAI-compatible endpoints
+  validationStatus String          @default("pending") // pending, valid, invalid
+  lastValidatedAt  DateTime?
+
+  // My Company / competitive framing (shared)
+  focusProviderId  String?
+  focusProvider    Provider?       @relation("AppFocusProvider", fields: [focusProviderId], references: [id])
+
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+}
+
+// ============================================================================
+// PROVIDER & OFFER MODELS
+// ============================================================================
+
+enum ProviderType {
+  MSO
+  TELCO
+  WIRELESS
+}
+
+model Provider {
+  id             String       @id @default(cuid())
+  slug           String       @unique
+  name           String
+  displayName    String
+  parentMsoGroup String?
+  providerType   ProviderType
+  country        String       @default("US")
+  regions        String[]     // Array of regions/states covered
+  logoUrl        String?
+  websiteUrl     String?
+  businessUrl    String?      // SMB-specific URL
+  priorityRank   Int          @default(100)
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  offers            Offer[]
+  sourceSnapshots   SourceSnapshot[]
+  refreshJobs       RefreshJob[]
+  packages          Package[]
+  storedInsights    StoredInsight[]
+  focusedByUsers    User[]            @relation("UserFocusProvider")
+  focusedByApp      AppSettings[]     @relation("AppFocusProvider")
+  deviceIncentives  DeviceIncentive[]
+  contractBuyouts   ContractBuyout[]
+
+  @@index([providerType])
+  @@index([priorityRank])
+}
+
+enum OfferCategory {
+  BROADBAND
+  MOBILE
+  VOICE
+  SECURITY
+  SDWAN
+  MANAGED_WIFI
+  BUNDLE
+  PACKAGE
+  OTHER
+}
+
+enum PackageType {
+  TIERED
+  CONFIGURABLE
+  FIXED
+}
+
+model Offer {
+  id              String        @id @default(cuid())
+  providerId      String
+  category        OfferCategory
+  name            String
+  displayName     String
+  description     String?       @db.Text
+  
+  // Pricing
+  priceMonthly    Decimal?      @db.Decimal(10, 2)
+  priceSetup      Decimal?      @db.Decimal(10, 2)
+  pricePromo      Decimal?      @db.Decimal(10, 2)
+  promoTermMonths Int?
+  contractMonths  Int?
+  
+  // Speeds (for broadband)
+  downloadMbps    Int?
+  uploadMbps      Int?
+  
+  // Mobile specific
+  dataAllowanceGb Decimal?      @db.Decimal(10, 2)
+  unlimitedData   Boolean       @default(false)
+  
+  // General
+  slaDetails      String?       @db.Text
+  eligibilityNotes String?      @db.Text
+  bundleOptions   String[]
+  
+  // Metadata
+  sourceUrl       String?
+  isActive        Boolean       @default(true)
+  lastSeenAt      DateTime      @default(now())
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  provider         Provider          @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  features         OfferFeature[]
+  observations     OfferObservation[]
+  packageOffers    PackageOffer[]
+  deviceIncentives DeviceIncentive[]
+
+  @@index([providerId])
+  @@index([category])
+  @@index([priceMonthly])
+  @@index([downloadMbps])
+}
+
+model OfferFeature {
+  id        String   @id @default(cuid())
+  offerId   String
+  featureKey String  // e.g., "static_ip", "symmetric", "ipv6"
+  featureValue String @default("true")
+  createdAt DateTime @default(now())
+
+  offer Offer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@unique([offerId, featureKey])
+  @@index([featureKey])
+}
+
+// ============================================================================
+// SOURCE TRACKING & HISTORY
+// ============================================================================
+
+model SourceSnapshot {
+  id            String   @id @default(cuid())
+  providerId    String
+  url           String
+  rawContent    String   @db.Text
+  contentHash   String
+  parserVersion String   @default("1.0")
+  fetchedAt     DateTime @default(now())
+
+  provider     Provider           @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  observations OfferObservation[]
+
+  @@index([providerId])
+  @@index([fetchedAt])
+  @@index([contentHash])
+}
+
+model OfferObservation {
+  id           String   @id @default(cuid())
+  offerId      String
+  snapshotId   String
+  priceMonthly Decimal? @db.Decimal(10, 2)
+  pricePromo   Decimal? @db.Decimal(10, 2)
+  observedAt   DateTime @default(now())
+  changes      Json?    // Store diffs from previous observation
+
+  offer    Offer          @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  snapshot SourceSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@index([offerId])
+  @@index([observedAt])
+}
+
+// ============================================================================
+// COMPARISON SETS
+// ============================================================================
+
+enum ComparisonType {
+  HEAD_TO_HEAD
+  MATRIX
+}
+
+model ComparisonSet {
+  id             String         @id @default(cuid())
+  userId         String
+  name           String
+  comparisonType ComparisonType
+  providerIds    String[]
+  categories     OfferCategory[]
+  filters        Json?          // Additional filter criteria
+  columns        String[]       // Columns to display
+  isPublic       Boolean        @default(false)
+  shareToken     String?        @unique
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([shareToken])
+}
+
+// ============================================================================
+// REFRESH JOBS
+// ============================================================================
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+model RefreshJob {
+  id          String     @id @default(cuid())
+  userId      String
+  providerIds String[]
+  categories  OfferCategory[]
+  status      JobStatus  @default(PENDING)
+  progress    Int        @default(0) // 0-100
+  message     String?
+  result      Json?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime   @default(now())
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  providers Provider[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// PACKAGES (Bundled Service Offerings)
+// ============================================================================
+
+model Package {
+  id              String        @id @default(cuid())
+  providerId      String
+  name            String
+  displayName     String
+  description     String?       @db.Text
+  packageType     PackageType   @default(FIXED)
+  tier            String?       // Good/Better/Best
+  basePrice       Decimal?      @db.Decimal(10, 2)
+  targetSegments  String[]      // SMB segment codes
+  isActive        Boolean       @default(true)
+  sourceUrl       String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  provider        Provider       @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  includedOffers  PackageOffer[]
+  addOns          PackageAddOn[]
+
+  @@index([providerId])
+  @@index([packageType])
+}
+
+model PackageOffer {
+  id         String  @id @default(cuid())
+  packageId  String
+  offerId    String
+  isBase     Boolean @default(true) // true = included, false = optional
+
+  package    Package @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  offer      Offer   @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@unique([packageId, offerId])
+}
+
+model PackageAddOn {
+  id          String   @id @default(cuid())
+  packageId   String
+  name        String
+  displayName String
+  price       Decimal? @db.Decimal(10, 2)
+  description String?
+  createdAt   DateTime @default(now())
+
+  package     Package  @relation(fields: [packageId], references: [id], onDelete: Cascade)
+
+  @@index([packageId])
+}
+
+// ============================================================================
+// SMB SEGMENTATION & BUYER PROFILES
+// ============================================================================
+
+model SMBSegment {
+  id                String   @id @default(cuid())
+  code              String   @unique // e.g., "MICRO_RETAIL"
+  name              String
+  description       String?  @db.Text
+
+  // Employee tiers
+  employeeMin       Int?
+  employeeMax       Int?
+  employeeTier      String?  // "1-4", "5-19", "20-99", "100-499"
+
+  // Revenue tiers
+  revenueMin        Decimal? @db.Decimal(12, 2)
+  revenueMax        Decimal? @db.Decimal(12, 2)
+  revenueTier       String?  // "<500K", "500K-1M", "1M-5M", "5M-25M"
+
+  // Industry
+  industry          String?  // retail, healthcare, professional_services, etc.
+  industryGroup     String?  // services, manufacturing, knowledge_worker
+
+  // Tech maturity
+  techMaturity      String?  // basic, moderate, advanced
+
+  // Behavioral attributes
+  priceSensitivity  String?  // high, medium, low
+  contractAversion  String?  // high, medium, low
+  supportImportance String?  // critical, important, low
+
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  buyerProfile      BuyerProfile?
+  storedInsights    StoredInsight[]
+
+  @@index([employeeTier])
+  @@index([industry])
+  @@index([techMaturity])
+}
+
+model BuyerProfile {
+  id                    String   @id @default(cuid())
+  segmentId             String   @unique
+
+  // Purchase journey
+  awarenessChannels     String[] // google, referral, vendor_outreach
+  considerationFactors  String[] // price, reliability, support, speed
+  decisionTriggers      String[] // contract_end, growth, outage
+
+  // Pain points (ranked)
+  painPoints            Json     // [{issue: "downtime", severity: 9}, ...]
+
+  // Contract attitudes
+  preferredTerms        String[] // month_to_month, 1_year, 2_year
+  switchingBarriers     String[] // bundling, email, equipment
+  loyaltyDrivers        String[] // relationship, convenience, fear
+
+  // Channel preferences
+  purchaseChannels      String[] // direct_sales, online, reseller
+  supportExpectations   String   @default("business_hours") // 24x7, business_hours, self_service
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  segment               SMBSegment @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================================
+// PERSISTENT AI INSIGHTS
+// ============================================================================
+
+enum InsightType {
+  COMPARISON
+  MARKET
+  PROVIDER
+  SEGMENT_ANALYSIS
+  BUYER_BEHAVIOR
+  COMPETITIVE_INTEL
+  EXECUTIVE_SUMMARY
+  PORTFOLIO_ANALYSIS
+  MOBILE_DEEP_ANALYSIS
+}
+
+model StoredInsight {
+  id              String      @id @default(cuid())
+  userId          String
+  insightType     InsightType
+
+  // Context keys for retrieval
+  providerId      String?
+  provider2Id     String?     // for comparisons
+  segmentId       String?
+  category        String?
+
+  // The insight content
+  title           String
+  content         Json        // Full structured insight
+  summary         String      @db.Text
+
+  // Metadata
+  modelUsed       String
+  tokensUsed      Int?
+  generatedAt     DateTime    @default(now())
+  expiresAt       DateTime?   // optional TTL
+
+  // User's company context
+  focusProviderId String?     // "my company" for competitive framing
+
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider        Provider?   @relation(fields: [providerId], references: [id])
+  segment         SMBSegment? @relation(fields: [segmentId], references: [id])
+
+  @@index([userId])
+  @@index([insightType])
+  @@index([providerId])
+  @@index([segmentId])
+  @@index([generatedAt])
+}
+
+// ============================================================================
+// MOBILE DEVICE INCENTIVES & CONTRACT BUYOUTS
+// ============================================================================
+
+model DeviceIncentive {
+  id                String    @id @default(cuid())
+  providerId        String
+  offerId           String?   // nullable -- some deals are provider-wide
+  deviceName        String    // e.g., "iPhone 17 Pro"
+  deviceBrand       String    // e.g., "Apple", "Samsung", "Google"
+  deviceModel       String    // e.g., "iPhone 17 Pro 128GB"
+  incentiveType     String    // FREE_WITH_PLAN, BOGO, TRADE_IN_CREDIT, MONTHLY_CREDIT, DISCOUNT
+  incentiveValue    Decimal?  @db.Decimal(10, 2) // dollar value of the incentive
+  deviceRetailPrice Decimal?  @db.Decimal(10, 2) // MSRP for comparison
+  monthlyCredit     Decimal?  @db.Decimal(10, 2) // if spread over months
+  creditMonths      Int?      // duration of monthly credits
+  conditions        String?   @db.Text  // e.g., "requires trade-in of eligible device"
+  requiresTradeIn   Boolean   @default(false)
+  requiresNewLine   Boolean   @default(false)
+  requiresPortIn    Boolean   @default(false)
+  minPlanTier       String?   // minimum plan required
+  isActive          Boolean   @default(true)
+  sourceUrl         String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  offer    Offer?   @relation(fields: [offerId], references: [id], onDelete: SetNull)
+
+  @@index([providerId])
+  @@index([deviceBrand])
+  @@index([incentiveType])
+}
+
+model ContractBuyout {
+  id                    String    @id @default(cuid())
+  providerId            String
+  maxBuyoutAmount       Decimal?  @db.Decimal(10, 2) // e.g., "up to $1000"
+  perLineMax            Decimal?  @db.Decimal(10, 2) // per-line cap
+  buyoutMethod          String    // VISA_CARD, BILL_CREDIT, ACCOUNT_CREDIT
+  conditions            String?   @db.Text
+  requiresPortIn        Boolean   @default(true)
+  requiresTradeIn       Boolean   @default(false)
+  minLinesRequired      Int?
+  eligibleFromProviders String[]  // e.g., ["any"] or specific providers
+
+  // T&C detail fields for comparison
+  coverageScope         String?   @db.Text  // what's covered: ETFs, device payments, both?
+  submissionDeadline    String?   // e.g., "60 days from activation"
+  paymentTimeline       String?   // e.g., "8-12 weeks via prepaid Visa card"
+  proofRequired         String?   @db.Text  // e.g., "Final bill showing ETF or device balance"
+  maxLinesEligible      Int?      // max lines that qualify
+  excludedPlans         String?   @db.Text  // plans or tiers NOT eligible
+  finePrint             String?   @db.Text  // key fine print / gotchas
+  stackableWithDeals    Boolean   @default(true) // can combine with device deals?
+
+  isActive              Boolean   @default(true)
+  sourceUrl             String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId])
+}
