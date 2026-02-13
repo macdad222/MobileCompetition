@@ -4,11 +4,11 @@ services:
       context: .
       target: dev
     ports:
-      - "3000:3000"
+      - "3900:3000"
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/smb_intelligence?schema=public
       - AUTH_SECRET=${AUTH_SECRET:-dev-secret-change-in-production-abc123xyz789}
-      - AUTH_URL=http://localhost:3000
+      - AUTH_URL=http://localhost:3900
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
       - NODE_ENV=development
       # Playwright needs this to find its browser binaries

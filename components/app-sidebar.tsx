@@ -64,13 +64,7 @@ export function AppSidebar() {
         })}
       </nav>
       
-      <div className="absolute bottom-4 left-4 right-4 space-y-3">
-        <div className="rounded-lg bg-slate-800 p-4">
-          <p className="text-xs text-slate-400 mb-2">Tip</p>
-          <p className="text-sm text-slate-300">
-            Configure your LLM API key in Settings to enable intelligent analysis.
-          </p>
-        </div>
+      <div className="absolute bottom-4 left-4 right-4">
         <div className="text-center">
           <p className="text-xs text-slate-500">Built by <span className="font-semibold text-slate-400">CMACLABS</span></p>
         </div>
