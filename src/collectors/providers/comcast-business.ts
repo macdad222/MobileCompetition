@@ -1,4 +1,4 @@
-import { BaseCollector, CollectorConfig, CollectionResult, CollectedOffer, CollectedDeviceIncentive, CollectedContractBuyout } from '../base';
+import { BaseCollector, CollectorConfig, CollectionResult, CollectedOffer, CollectedDeviceIncentive, CollectedContractBuyout, ContentSelectors } from '../base';
 import { OfferCategory } from '@prisma/client';
 import { generateProviderDeviceIncentives, generateProviderBuyout } from '../device-seed-data';
 
@@ -252,6 +252,14 @@ export class ComcastBusinessCollector extends BaseCollector {
   providerSlug = 'comcast-business';
   supportedCategories: OfferCategory[] = ['BROADBAND', 'VOICE', 'MOBILE', 'PACKAGE'];
 
+  protected contentZone = 'main, .learn-page-content, [role="main"]';
+  protected contentSelectors: ContentSelectors = {
+    BROADBAND: '.plan-card, [class*="pricing"], [class*="plan"]',
+    MOBILE: '.plan-card, [class*="plan"]',
+    VOICE: '.plan-card, [class*="plan"]',
+    PACKAGE: '[class*="bundle"], .plan-card',
+  };
+
   async collect(config: CollectorConfig): Promise<CollectionResult[]> {
     const results: CollectionResult[] = [];
 
@@ -262,7 +270,7 @@ export class ComcastBusinessCollector extends BaseCollector {
 
       const scraped = await this.scrapeAndExtract(url, 'Comcast Business', category, config.llmConfig);
       if (scraped) {
-        const result: CollectionResult = { success: true, offers: scraped.offers, rawContent: scraped.rawContent, sourceUrl: url, scraped: true };
+        const result: CollectionResult = { success: true, offers: scraped.offers, rawContent: scraped.rawContent, scrapeConfidence: scraped.confidence, sourceUrl: url, scraped: true };
         if (category === 'MOBILE') {
           const deviceData = await this.scrapeDeviceIncentives(COMCAST_URLS.devices, 'Comcast Business', config.llmConfig);
           result.deviceIncentives = deviceData?.devices || SEED_DEVICE_INCENTIVES;

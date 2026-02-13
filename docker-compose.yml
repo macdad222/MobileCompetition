@@ -11,10 +11,14 @@ services:
       - AUTH_URL=http://localhost:3000
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
       - NODE_ENV=development
+      # Playwright needs this to find its browser binaries
+      - PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
     volumes:
       - .:/app
       - /app/node_modules
       - /app/.next
+    # Shared memory for Chromium (prevents crashes in Docker)
+    shm_size: '512mb'
     depends_on:
       db:
         condition: service_healthy

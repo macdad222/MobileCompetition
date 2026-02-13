@@ -1,4 +1,4 @@
-import { BaseCollector, CollectorConfig, CollectionResult, CollectedOffer, CollectedDeviceIncentive, CollectedContractBuyout } from '../base';
+import { BaseCollector, CollectorConfig, CollectionResult, CollectedOffer, CollectedDeviceIncentive, CollectedContractBuyout, ContentSelectors } from '../base';
 import { generateProviderDeviceIncentives, generateProviderBuyout } from '../device-seed-data';
 import { OfferCategory } from '@prisma/client';
 
@@ -147,6 +147,14 @@ export class TMobileBusinessCollector extends BaseCollector {
   providerSlug = 'tmobile-business';
   supportedCategories: OfferCategory[] = ['MOBILE', 'BROADBAND', 'VOICE', 'PACKAGE'];
 
+  protected contentZone = 'main, #main-content, [role="main"]';
+  protected contentSelectors: ContentSelectors = {
+    MOBILE: '.plan-card, [class*="plan"], [class*="Plan"]',
+    BROADBAND: '.plan-card, [class*="plan"]',
+    VOICE: '.plan-card',
+    PACKAGE: '[class*="bundle"], .plan-card',
+  };
+
   async collect(config: CollectorConfig): Promise<CollectionResult[]> {
     const results: CollectionResult[] = [];
 
@@ -157,7 +165,7 @@ export class TMobileBusinessCollector extends BaseCollector {
 
       const scraped = await this.scrapeAndExtract(url, 'T-Mobile Business', category, config.llmConfig);
       if (scraped) {
-        const result: CollectionResult = { success: true, offers: scraped.offers, rawContent: scraped.rawContent, sourceUrl: url, scraped: true };
+        const result: CollectionResult = { success: true, offers: scraped.offers, rawContent: scraped.rawContent, scrapeConfidence: scraped.confidence, sourceUrl: url, scraped: true };
         // For MOBILE, also try to scrape device incentives
         if (category === 'MOBILE') {
           const deviceData = await this.scrapeDeviceIncentives(TMOBILE_URLS.devices, 'T-Mobile Business', config.llmConfig);

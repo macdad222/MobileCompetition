@@ -3,6 +3,7 @@ import { JobStatus, OfferCategory, PackageType } from '@prisma/client';
 import { getCollectorForProvider } from './registry';
 import { createContentHash, CollectedOffer, CollectedDeviceIncentive, CollectedContractBuyout } from './base';
 import { getLLMConfig } from '@/src/llm/helpers';
+import { closeBrowser } from './browser-manager';
 
 export interface RefreshJobParams {
   userId: string;
@@ -386,11 +387,11 @@ export async function runRefreshJob(jobId: string): Promise<void> {
                       featureKey: key,
                     },
                   },
-                  update: { featureValue: value },
+                  update: { featureValue: String(value) },
                   create: {
                     offerId: savedOffer.id,
                     featureKey: key,
-                    featureValue: value,
+                    featureValue: String(value),
                   },
                 });
               }
@@ -469,6 +470,11 @@ export async function runRefreshJob(jobId: string): Promise<void> {
         completedAt: new Date(),
         message: error instanceof Error ? error.message : 'Unknown error',
       },
+    });
+  } finally {
+    // Always close the shared browser instance after the job finishes
+    await closeBrowser().catch(err => {
+      console.warn('[refresh] Failed to close browser:', err);
     });
   }
 }

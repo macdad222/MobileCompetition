@@ -1,14 +1,14 @@
-import { BaseCollector, CollectorConfig, CollectionResult, CollectedOffer, CollectedDeviceIncentive, CollectedContractBuyout } from '../base';
+import { BaseCollector, CollectorConfig, CollectionResult, CollectedOffer, CollectedDeviceIncentive, CollectedContractBuyout, ContentSelectors } from '../base';
 import { generateProviderDeviceIncentives, generateProviderBuyout } from '../device-seed-data';
 import { OfferCategory } from '@prisma/client';
 
-// AT&T Business source URLs
+// AT&T Business source URLs (updated Feb 2026 — AT&T restructured their site)
 const ATT_URLS: Record<string, string> = {
-  broadband: 'https://www.business.att.com/products/fiber-internet.html',
-  mobile: 'https://www.business.att.com/products/business-wireless.html',
-  voice: 'https://www.business.att.com/products/voice-services.html',
-  packages: 'https://www.business.att.com/products/bundles.html',
-  devices: 'https://www.business.att.com/products/devices.html',
+  broadband: 'https://www.business.att.com/products/business-fiber-internet.html',
+  mobile: 'https://www.business.att.com/products/wireless-plans.html',
+  voice: 'https://www.business.att.com/products/att-phone-for-business.html',
+  packages: 'https://www.business.att.com/bundles.html',
+  devices: 'https://www.att.com/buy/phones/?smb=true',
 };
 
 const CATEGORY_URL_MAP: Record<string, string> = {
@@ -169,6 +169,16 @@ export class ATTBusinessCollector extends BaseCollector {
   providerSlug = 'att-business';
   supportedCategories: OfferCategory[] = ['BROADBAND', 'MOBILE', 'VOICE', 'PACKAGE'];
 
+  // AT&T Business is a JS-rendered SPA — requires Playwright
+  protected usePlaywright = true;
+  protected contentZone = 'main, #content, [role="main"]';
+  protected contentSelectors: ContentSelectors = {
+    BROADBAND: '.plan-card, .product-card, [data-testid="pricing"]',
+    MOBILE: '.plan-card, .device-card, .pricing-section',
+    VOICE: '.plan-card, .product-card',
+    PACKAGE: '.bundle-card, .plan-card',
+  };
+
   async collect(config: CollectorConfig): Promise<CollectionResult[]> {
     const results: CollectionResult[] = [];
 
@@ -179,7 +189,7 @@ export class ATTBusinessCollector extends BaseCollector {
 
       const scraped = await this.scrapeAndExtract(url, 'AT&T Business', category, config.llmConfig);
       if (scraped) {
-        const result: CollectionResult = { success: true, offers: scraped.offers, rawContent: scraped.rawContent, sourceUrl: url, scraped: true };
+        const result: CollectionResult = { success: true, offers: scraped.offers, rawContent: scraped.rawContent, scrapeConfidence: scraped.confidence, sourceUrl: url, scraped: true };
         // For MOBILE, also try to scrape device incentives
         if (category === 'MOBILE') {
           const deviceData = await this.scrapeDeviceIncentives(ATT_URLS.devices, 'AT&T Business', config.llmConfig);

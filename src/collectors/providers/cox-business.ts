@@ -1,4 +1,4 @@
-import { BaseCollector, CollectorConfig, CollectionResult, CollectedOffer, CollectedDeviceIncentive, CollectedContractBuyout } from '../base';
+import { BaseCollector, CollectorConfig, CollectionResult, CollectedOffer, CollectedDeviceIncentive, CollectedContractBuyout, ContentSelectors } from '../base';
 import { OfferCategory } from '@prisma/client';
 import { generateProviderDeviceIncentives, generateProviderBuyout } from '../device-seed-data';
 
@@ -155,6 +155,16 @@ export class CoxBusinessCollector extends BaseCollector {
   providerSlug = 'cox-business';
   supportedCategories: OfferCategory[] = ['BROADBAND', 'VOICE', 'MOBILE', 'PACKAGE'];
 
+  // Cox Business is a JS-rendered SPA — requires Playwright
+  protected usePlaywright = true;
+  protected contentZone = 'main, #content, [role="main"]';
+  protected contentSelectors: ContentSelectors = {
+    BROADBAND: '.plan-card, [class*="pricing"], [class*="plan"]',
+    MOBILE: '.plan-card, [class*="plan"]',
+    VOICE: '.plan-card',
+    PACKAGE: '[class*="bundle"]',
+  };
+
   async collect(config: CollectorConfig): Promise<CollectionResult[]> {
     const results: CollectionResult[] = [];
 
@@ -165,7 +175,7 @@ export class CoxBusinessCollector extends BaseCollector {
 
       const scraped = await this.scrapeAndExtract(url, 'Cox Business', category, config.llmConfig);
       if (scraped) {
-        const result: CollectionResult = { success: true, offers: scraped.offers, rawContent: scraped.rawContent, sourceUrl: url, scraped: true };
+        const result: CollectionResult = { success: true, offers: scraped.offers, rawContent: scraped.rawContent, scrapeConfidence: scraped.confidence, sourceUrl: url, scraped: true };
         if (category === 'MOBILE') {
           const deviceData = await this.scrapeDeviceIncentives(COX_URLS.devices, 'Cox Business', config.llmConfig);
           result.deviceIncentives = deviceData?.devices || SEED_DEVICE_INCENTIVES;

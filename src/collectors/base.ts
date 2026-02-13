@@ -1,5 +1,6 @@
 import { OfferCategory } from '@prisma/client';
 import { LLMClientConfig, callLLM, LLMMessage } from '@/src/llm/client';
+import { openPage, extractPageText } from './browser-manager';
 
 export interface CollectorConfig {
   providerId: string;
@@ -35,13 +36,13 @@ export interface CollectedContractBuyout {
   minLinesRequired?: number;
   eligibleFromProviders?: string[];
   // T&C detail fields
-  coverageScope?: string;      // what's covered: ETFs, device payments, both?
-  submissionDeadline?: string; // e.g., "60 days from activation"
-  paymentTimeline?: string;    // e.g., "8-12 weeks via prepaid Visa card"
-  proofRequired?: string;      // e.g., "Final bill showing ETF or device balance"
+  coverageScope?: string;
+  submissionDeadline?: string;
+  paymentTimeline?: string;
+  proofRequired?: string;
   maxLinesEligible?: number;
-  excludedPlans?: string;      // plans or tiers NOT eligible
-  finePrint?: string;          // key gotchas
+  excludedPlans?: string;
+  finePrint?: string;
   stackableWithDeals?: boolean;
   sourceUrl?: string;
 }
@@ -70,6 +71,16 @@ export interface CollectedOffer {
   contractBuyout?: CollectedContractBuyout;
 }
 
+export type ScrapeConfidence = 'high' | 'medium' | 'low';
+export type ScrapeFailureReason =
+  | 'no_llm_config'
+  | 'page_load_failed'
+  | 'content_too_short'
+  | 'no_pricing_signals'
+  | 'llm_extraction_empty'
+  | 'llm_extraction_invalid'
+  | 'extraction_error';
+
 export interface CollectionResult {
   success: boolean;
   offers: CollectedOffer[];
@@ -77,6 +88,8 @@ export interface CollectionResult {
   sourceUrl: string;
   error?: string;
   scraped?: boolean;
+  scrapeConfidence?: ScrapeConfidence;
+  failureReason?: ScrapeFailureReason;
   // Separate device/buyout data (provider-level, not per-offer)
   deviceIncentives?: CollectedDeviceIncentive[];
   contractBuyout?: CollectedContractBuyout;
@@ -88,18 +101,63 @@ export interface ProviderCollector {
   collect(config: CollectorConfig): Promise<CollectionResult[]>;
 }
 
+/**
+ * Content selectors per category — Playwright waits for these to appear
+ * before extracting text. Providers can override with more specific selectors.
+ */
+export interface ContentSelectors {
+  [category: string]: string; // CSS selectors to wait for
+}
+
+/**
+ * Price ranges by category for sanity checking LLM extraction.
+ */
+const PRICE_RANGES: Record<string, { min: number; max: number }> = {
+  BROADBAND: { min: 20, max: 500 },
+  MOBILE: { min: 10, max: 200 },
+  VOICE: { min: 10, max: 150 },
+  PACKAGE: { min: 50, max: 800 },
+};
+
 export abstract class BaseCollector implements ProviderCollector {
   abstract providerSlug: string;
   abstract supportedCategories: OfferCategory[];
-  
+
+  /**
+   * Whether this collector requires Playwright (headless browser) for JS-rendered pages.
+   * Default: false (use simple HTTP fetch). Set to true for providers like AT&T, Cox
+   * whose pages are SPAs that don't serve pricing content without JS execution.
+   */
+  protected usePlaywright: boolean = false;
+
+  /**
+   * Optional content selectors per category for Playwright smart-waiting.
+   * Only used when usePlaywright = true.
+   */
+  protected contentSelectors: ContentSelectors = {};
+
+  /**
+   * Optional CSS selector for the main content zone to focus text extraction.
+   * Only used when usePlaywright = true.
+   */
+  protected contentZone?: string;
+
+  // ============================================================================
+  // PAGE FETCHING — two strategies: simple fetch (default) or Playwright
+  // ============================================================================
+
+  /**
+   * Simple HTTP fetch — fast, works for most provider sites that serve
+   * server-rendered HTML. This is the default method.
+   */
   protected async fetchPage(url: string): Promise<string> {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 15000);
-      
+
       const response = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.5',
           'Accept-Encoding': 'gzip, deflate',
@@ -107,13 +165,13 @@ export abstract class BaseCollector implements ProviderCollector {
         },
         signal: controller.signal,
       });
-      
+
       clearTimeout(timeout);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-      
+
       return await response.text();
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
@@ -123,6 +181,9 @@ export abstract class BaseCollector implements ProviderCollector {
     }
   }
 
+  /**
+   * Clean raw HTML to readable text using regex (for simple fetch mode).
+   */
   protected cleanHtmlToText(html: string): string {
     let text = html;
     text = text.replace(/<script[\s\S]*?<\/script>/gi, '');
@@ -150,11 +211,168 @@ export abstract class BaseCollector implements ProviderCollector {
     text = text.replace(/\n\s*\n/g, '\n');
     text = text.replace(/\n{3,}/g, '\n\n');
     text = text.trim();
-    if (text.length > 12000) {
-      text = text.substring(0, 12000) + '\n\n[Content truncated for analysis]';
+    if (text.length > 20000) {
+      text = text.substring(0, 20000) + '\n\n[Content truncated for analysis]';
     }
     return text;
   }
+
+  /**
+   * Fetch a page using Playwright, waiting for JS rendering and content signals.
+   * Used only when usePlaywright = true (for JS-heavy SPAs like AT&T, Cox).
+   */
+  protected async fetchRenderedText(url: string, category?: string): Promise<string> {
+    const waitSelector = category ? this.contentSelectors[category] : undefined;
+
+    const page = await openPage(url, {
+      waitForSelector: waitSelector,
+      waitTimeoutMs: 45000,
+    });
+
+    try {
+      const text = await extractPageText(page, this.contentZone);
+      return text;
+    } finally {
+      await page.close().catch(() => {});
+    }
+  }
+
+  /**
+   * Get page text using the appropriate method for this collector.
+   */
+  protected async getPageText(url: string, category?: string): Promise<string> {
+    if (this.usePlaywright) {
+      return this.fetchRenderedText(url, category);
+    }
+    // Simple fetch + HTML cleaning
+    const html = await this.fetchPage(url);
+    return this.cleanHtmlToText(html);
+  }
+
+  // ============================================================================
+  // CONTENT VALIDATION — verify scraped text has real pricing data
+  // ============================================================================
+
+  /**
+   * Check that scraped text contains pricing signals before sending to LLM.
+   * Returns a confidence level and specific issues found.
+   */
+  protected validateScrapedContent(
+    text: string,
+    category: OfferCategory
+  ): { valid: boolean; confidence: ScrapeConfidence; issues: string[] } {
+    const issues: string[] = [];
+
+    if (text.length < 200) {
+      return { valid: false, confidence: 'low', issues: ['Content too short — page likely did not render'] };
+    }
+
+    // Check for dollar signs / price patterns
+    const pricePattern = /\$\d+(\.\d{2})?/g;
+    const priceMatches = text.match(pricePattern) || [];
+    if (priceMatches.length < 2) {
+      issues.push(`Only ${priceMatches.length} price mentions found (expected 2+)`);
+    }
+
+    // Check for per-month patterns
+    const monthlyPattern = /\/mo|per\s+month|monthly|\/month/gi;
+    const monthlyMatches = text.match(monthlyPattern) || [];
+    if (monthlyMatches.length === 0) {
+      issues.push('No monthly pricing language found');
+    }
+
+    // Category-specific checks
+    if (category === 'BROADBAND') {
+      const speedPattern = /mbps|gbps|megabit|gigabit/gi;
+      if (!speedPattern.test(text)) {
+        issues.push('No speed references found for broadband page');
+      }
+    }
+
+    if (category === 'MOBILE') {
+      const mobilePattern = /unlimited|5g|per\s+line|data|hotspot|wireless/gi;
+      const mobileMatches = text.match(mobilePattern) || [];
+      if (mobileMatches.length < 2) {
+        issues.push('Few mobile-specific terms found');
+      }
+    }
+
+    // Determine confidence
+    let confidence: ScrapeConfidence = 'high';
+    if (issues.length >= 3) {
+      confidence = 'low';
+    } else if (issues.length >= 1) {
+      confidence = 'medium';
+    }
+
+    const valid = priceMatches.length >= 1 || text.length >= 1000;
+
+    return { valid, confidence, issues };
+  }
+
+  /**
+   * Validate LLM-extracted offers for sanity.
+   */
+  protected validateExtractedOffers(
+    offers: CollectedOffer[],
+    category: OfferCategory,
+    providerName: string
+  ): { valid: boolean; confidence: ScrapeConfidence; issues: string[] } {
+    const issues: string[] = [];
+    const priceRange = PRICE_RANGES[category] || { min: 10, max: 500 };
+
+    if (offers.length === 0) {
+      return { valid: false, confidence: 'low', issues: ['No offers extracted'] };
+    }
+
+    if (offers.length > 25) {
+      issues.push(`Unusually high offer count (${offers.length}) — may include duplicates`);
+    }
+
+    // Check that at least some offers have prices
+    const withPrices = offers.filter(o => o.priceMonthly != null || o.pricePromo != null);
+    if (withPrices.length === 0) {
+      issues.push('No offers have pricing data');
+    }
+
+    // Price sanity check
+    for (const offer of offers) {
+      if (offer.priceMonthly != null) {
+        if (offer.priceMonthly < priceRange.min || offer.priceMonthly > priceRange.max) {
+          issues.push(`${offer.displayName}: price $${offer.priceMonthly}/mo outside expected range $${priceRange.min}-$${priceRange.max}`);
+        }
+      }
+    }
+
+    // Check for broadband speeds
+    if (category === 'BROADBAND') {
+      const withSpeeds = offers.filter(o => o.downloadMbps != null);
+      if (withSpeeds.length === 0) {
+        issues.push('No broadband offers have download speed data');
+      }
+    }
+
+    // Check for identical prices (potential hallucination)
+    const prices = offers.map(o => o.priceMonthly).filter(p => p != null);
+    const uniquePrices = new Set(prices);
+    if (prices.length >= 3 && uniquePrices.size === 1) {
+      issues.push('All offers have identical prices — possible LLM hallucination');
+    }
+
+    let confidence: ScrapeConfidence = 'high';
+    if (issues.length >= 3 || withPrices.length === 0) {
+      confidence = 'low';
+    } else if (issues.length >= 1) {
+      confidence = 'medium';
+    }
+
+    const valid = offers.length > 0 && withPrices.length > 0;
+    return { valid, confidence, issues };
+  }
+
+  // ============================================================================
+  // LLM EXTRACTION — send page text to LLM for structured data extraction
+  // ============================================================================
 
   /**
    * Use the user's LLM to extract structured plan data from scraped page text.
@@ -250,7 +468,7 @@ Rules:
     ];
 
     try {
-      const response = await callLLM(llmConfig, messages);
+      const response = await callLLM(llmConfig, messages, 8192);
       const content = response.content.trim();
       
       const match = content.match(/\[[\s\S]*\]/);
@@ -375,7 +593,7 @@ Rules:
     ];
 
     try {
-      const response = await callLLM(llmConfig, messages);
+      const response = await callLLM(llmConfig, messages, 8192);
       const content = response.content.trim();
       
       const match = content.match(/\{[\s\S]*\}/);
@@ -421,39 +639,73 @@ Rules:
     }
   }
 
+  // ============================================================================
+  // SCRAPE & EXTRACT — full pipeline with Playwright + validation
+  // ============================================================================
+
   /**
-   * Attempt to scrape a URL and extract offers using LLM.
+   * Scrape a URL using Playwright, validate content, extract offers via LLM, and validate results.
+   * Returns null (triggering seed data fallback) if any step fails.
    */
   protected async scrapeAndExtract(
     url: string,
     providerName: string,
     category: OfferCategory,
     llmConfig?: LLMClientConfig | null
-  ): Promise<{ offers: CollectedOffer[]; rawContent: string } | null> {
+  ): Promise<{ offers: CollectedOffer[]; rawContent: string; confidence: ScrapeConfidence } | null> {
     if (!llmConfig) return null;
 
     try {
-      console.log(`[${this.providerSlug}] Fetching ${url}...`);
-      const html = await this.fetchPage(url);
-      const text = this.cleanHtmlToText(html);
-      
-      if (text.length < 100) {
-        console.warn(`[${this.providerSlug}] Page content too short (${text.length} chars), likely JS-rendered`);
+      // Step 1: Fetch page content (Playwright for JS-heavy sites, simple fetch for others)
+      const method = this.usePlaywright ? 'Playwright' : 'fetch';
+      console.log(`[${this.providerSlug}] Fetching ${url} via ${method}...`);
+      const text = await this.getPageText(url, category);
+
+      if (text.length < 200) {
+        console.warn(`[${this.providerSlug}] Page content too short (${text.length} chars) after rendering`);
         return null;
       }
-      
-      console.log(`[${this.providerSlug}] Extracted ${text.length} chars of text, sending to LLM for ${category} extraction...`);
+
+      // Step 2: Validate scraped content for pricing signals
+      const contentCheck = this.validateScrapedContent(text, category);
+      console.log(`[${this.providerSlug}] Content validation: ${contentCheck.confidence} confidence (${contentCheck.issues.length} issues)`);
+      if (contentCheck.issues.length > 0) {
+        contentCheck.issues.forEach(i => console.log(`  - ${i}`));
+      }
+
+      if (!contentCheck.valid) {
+        console.warn(`[${this.providerSlug}] Content validation failed for ${category} — no pricing signals found`);
+        return null;
+      }
+
+      // Step 3: LLM extraction
+      console.log(`[${this.providerSlug}] Sending ${text.length} chars to LLM for ${category} extraction...`);
       const offers = await this.extractOffersWithLLM(llmConfig, text, providerName, category, url);
-      
-      if (offers.length === 0) {
-        console.warn(`[${this.providerSlug}] LLM extracted 0 offers for ${category}, falling back to seed data`);
+
+      // Step 4: Validate extracted offers
+      const offerCheck = this.validateExtractedOffers(offers, category, providerName);
+      console.log(`[${this.providerSlug}] Extraction validation: ${offerCheck.confidence} confidence, ${offers.length} offers`);
+      if (offerCheck.issues.length > 0) {
+        offerCheck.issues.forEach(i => console.log(`  - ${i}`));
+      }
+
+      if (!offerCheck.valid) {
+        console.warn(`[${this.providerSlug}] Extraction validation failed for ${category}`);
         return null;
       }
-      
-      console.log(`[${this.providerSlug}] Successfully extracted ${offers.length} ${category} offers from live scrape`);
-      
+
+      // Combine confidence: take the lower of content and extraction confidence
+      const confidenceOrder: ScrapeConfidence[] = ['low', 'medium', 'high'];
+      const finalConfidence = confidenceOrder[Math.min(
+        confidenceOrder.indexOf(contentCheck.confidence),
+        confidenceOrder.indexOf(offerCheck.confidence)
+      )];
+
+      console.log(`[${this.providerSlug}] ✓ ${offers.length} ${category} offers extracted (${finalConfidence} confidence)`);
+
       return {
         offers,
+        confidence: finalConfidence,
         rawContent: JSON.stringify({
           provider: this.providerSlug,
           category,
@@ -462,6 +714,7 @@ Rules:
           url,
           textLength: text.length,
           offersExtracted: offers.length,
+          confidence: finalConfidence,
           plans: offers,
         }, null, 2),
       };
@@ -472,7 +725,7 @@ Rules:
   }
 
   /**
-   * Attempt to scrape device deals/incentives from a provider's device page.
+   * Scrape device deals/incentives from a provider's device page using Playwright.
    */
   protected async scrapeDeviceIncentives(
     url: string,
@@ -482,18 +735,21 @@ Rules:
     if (!llmConfig) return null;
 
     try {
-      console.log(`[${this.providerSlug}] Fetching device page ${url}...`);
-      const html = await this.fetchPage(url);
-      const text = this.cleanHtmlToText(html);
-      
-      if (text.length < 100) return null;
-      
+      const method = this.usePlaywright ? 'Playwright' : 'fetch';
+      console.log(`[${this.providerSlug}] Fetching device page ${url} via ${method}...`);
+      const text = await this.getPageText(url, 'MOBILE');
+
+      if (text.length < 200) {
+        console.log(`[${this.providerSlug}] Device page content too short (${text.length} chars)`);
+        return null;
+      }
+
       console.log(`[${this.providerSlug}] Extracting device incentives from ${text.length} chars...`);
       const result = await this.extractDeviceIncentivesWithLLM(llmConfig, text, providerName, url);
-      
+
       if (result.devices.length === 0 && !result.buyout) return null;
-      
-      console.log(`[${this.providerSlug}] Extracted ${result.devices.length} device incentives${result.buyout ? ' + buyout offer' : ''}`);
+
+      console.log(`[${this.providerSlug}] ✓ ${result.devices.length} device incentives${result.buyout ? ' + buyout offer' : ''}`);
       return result;
     } catch (error) {
       console.warn(`[${this.providerSlug}] Device scrape failed for ${url}:`, error instanceof Error ? error.message : error);

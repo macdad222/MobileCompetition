@@ -1,4 +1,4 @@
-import { BaseCollector, CollectorConfig, CollectionResult, CollectedOffer, CollectedDeviceIncentive, CollectedContractBuyout } from '../base';
+import { BaseCollector, CollectorConfig, CollectionResult, CollectedOffer, CollectedDeviceIncentive, CollectedContractBuyout, ContentSelectors } from '../base';
 import { generateProviderDeviceIncentives, generateProviderBuyout } from '../device-seed-data';
 import { OfferCategory } from '@prisma/client';
 
@@ -155,6 +155,14 @@ export class VerizonBusinessCollector extends BaseCollector {
   providerSlug = 'verizon-business';
   supportedCategories: OfferCategory[] = ['BROADBAND', 'MOBILE', 'VOICE', 'PACKAGE'];
 
+  protected contentZone = 'main, #content, [role="main"]';
+  protected contentSelectors: ContentSelectors = {
+    BROADBAND: '.plan-card, .pricing-card, [class*="plan"]',
+    MOBILE: '.plan-card, [class*="plan"], [class*="device"]',
+    VOICE: '.plan-card, [class*="plan"]',
+    PACKAGE: '[class*="bundle"], .plan-card',
+  };
+
   async collect(config: CollectorConfig): Promise<CollectionResult[]> {
     const results: CollectionResult[] = [];
 
@@ -165,7 +173,7 @@ export class VerizonBusinessCollector extends BaseCollector {
 
       const scraped = await this.scrapeAndExtract(url, 'Verizon Business', category, config.llmConfig);
       if (scraped) {
-        const result: CollectionResult = { success: true, offers: scraped.offers, rawContent: scraped.rawContent, sourceUrl: url, scraped: true };
+        const result: CollectionResult = { success: true, offers: scraped.offers, rawContent: scraped.rawContent, scrapeConfidence: scraped.confidence, sourceUrl: url, scraped: true };
         // For MOBILE, also try to scrape device incentives
         if (category === 'MOBILE') {
           const deviceData = await this.scrapeDeviceIncentives(VERIZON_URLS.devices, 'Verizon Business', config.llmConfig);
