@@ -27,6 +27,8 @@ import {
   Heart,
   Shield,
   MessageSquare,
+  RefreshCw,
+  Clock,
 } from 'lucide-react';
 
 interface Segment {
@@ -87,8 +89,10 @@ export default function SegmentsPage() {
   // AI states
   const [segAnalysis, setSegAnalysis] = useState<SegmentAnalysis | null>(null);
   const [segAnalysisLoading, setSegAnalysisLoading] = useState(false);
+  const [segAnalysisAt, setSegAnalysisAt] = useState<string | null>(null);
   const [buyerBehavior, setBuyerBehavior] = useState<BuyerBehavior | null>(null);
   const [buyerLoading, setBuyerLoading] = useState(false);
+  const [buyerAnalysisAt, setBuyerAnalysisAt] = useState<string | null>(null);
 
   useEffect(() => { fetchSegments(); }, []);
 
@@ -108,7 +112,34 @@ export default function SegmentsPage() {
   function selectSegment(seg: Segment) {
     setSelectedSegment(seg);
     setSegAnalysis(null);
+    setSegAnalysisAt(null);
     setBuyerBehavior(null);
+    setBuyerAnalysisAt(null);
+    // Load cached analyses for this segment
+    fetchCachedSegmentAnalysis(seg.id);
+    fetchCachedBuyerAnalysis(seg.id);
+  }
+
+  async function fetchCachedSegmentAnalysis(segmentId: string) {
+    try {
+      const res = await fetch(`/api/insights/cached?insightType=SEGMENT_ANALYSIS&segmentId=${segmentId}`);
+      const data = await res.json();
+      if (data.insight?.content) {
+        setSegAnalysis(data.insight.content as SegmentAnalysis);
+        setSegAnalysisAt(data.insight.generatedAt);
+      }
+    } catch (error) { /* silent */ }
+  }
+
+  async function fetchCachedBuyerAnalysis(segmentId: string) {
+    try {
+      const res = await fetch(`/api/insights/cached?insightType=BUYER_BEHAVIOR&segmentId=${segmentId}`);
+      const data = await res.json();
+      if (data.insight?.content) {
+        setBuyerBehavior(data.insight.content as BuyerBehavior);
+        setBuyerAnalysisAt(data.insight.generatedAt);
+      }
+    } catch (error) { /* silent */ }
   }
 
   async function generateSegAnalysis() {
@@ -123,6 +154,7 @@ export default function SegmentsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setSegAnalysis(data.analysis);
+      setSegAnalysisAt(new Date().toISOString());
     } catch (error) {
       toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed', variant: 'destructive' });
     } finally {
@@ -142,6 +174,7 @@ export default function SegmentsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setBuyerBehavior(data.analysis);
+      setBuyerAnalysisAt(new Date().toISOString());
     } catch (error) {
       toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed', variant: 'destructive' });
     } finally {
@@ -323,15 +356,27 @@ export default function SegmentsPage() {
               </Card>
 
               {/* AI Actions */}
-              <div className="flex gap-3">
-                <Button onClick={generateSegAnalysis} disabled={segAnalysisLoading}>
-                  {segAnalysisLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
-                  Segment Analysis
+              <div className="flex gap-3 flex-wrap items-center">
+                <Button onClick={generateSegAnalysis} disabled={segAnalysisLoading} variant={segAnalysis ? 'outline' : 'default'}>
+                  {segAnalysisLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : segAnalysis ? <RefreshCw className="h-4 w-4 mr-2" /> : <Sparkles className="h-4 w-4 mr-2" />}
+                  {segAnalysis ? 'Refresh' : ''} Segment Analysis
                 </Button>
+                {segAnalysisAt && (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {new Date(segAnalysisAt).toLocaleDateString()} {new Date(segAnalysisAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
                 <Button variant="outline" onClick={generateBuyerAnalysis} disabled={buyerLoading}>
-                  {buyerLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Brain className="h-4 w-4 mr-2" />}
-                  Buyer Behavior Deep Dive
+                  {buyerLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : buyerBehavior ? <RefreshCw className="h-4 w-4 mr-2" /> : <Brain className="h-4 w-4 mr-2" />}
+                  {buyerBehavior ? 'Refresh' : ''} Buyer Behavior Deep Dive
                 </Button>
+                {buyerAnalysisAt && (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {new Date(buyerAnalysisAt).toLocaleDateString()} {new Date(buyerAnalysisAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
               </div>
 
               {/* Segment Analysis Results */}

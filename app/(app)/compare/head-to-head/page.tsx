@@ -24,6 +24,8 @@ import {
   Sparkles,
   Trophy,
   AlertCircle,
+  RefreshCw,
+  Clock,
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
@@ -86,13 +88,44 @@ export default function HeadToHeadPage() {
   const [offers2, setOffers2] = useState<Offer[]>([]);
   const [aiAnalysis, setAiAnalysis] = useState<ComparisonAnalysis | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [analysisGeneratedAt, setAnalysisGeneratedAt] = useState<string | null>(null);
 
   useEffect(() => {
     if (provider1 && provider2 && category) {
       fetchComparison();
-      setAiAnalysis(null); // Clear AI analysis when providers change
+      fetchCachedAnalysis();
     }
   }, [provider1, provider2, category]);
+
+  async function fetchCachedAnalysis() {
+    try {
+      // Resolve provider IDs from slugs
+      const [res1, res2] = await Promise.all([
+        fetch(`/api/providers/${provider1}`),
+        fetch(`/api/providers/${provider2}`),
+      ]);
+      const [d1, d2] = await Promise.all([res1.json(), res2.json()]);
+      if (!d1.provider?.id || !d2.provider?.id) return;
+
+      const params = new URLSearchParams({
+        insightType: 'COMPARISON',
+        providerId: d1.provider.id,
+        provider2Id: d2.provider.id,
+        category,
+      });
+      const res = await fetch(`/api/insights/cached?${params}`);
+      const data = await res.json();
+      if (data.insight?.content) {
+        setAiAnalysis(data.insight.content as ComparisonAnalysis);
+        setAnalysisGeneratedAt(data.insight.generatedAt);
+      } else {
+        setAiAnalysis(null);
+        setAnalysisGeneratedAt(null);
+      }
+    } catch (error) {
+      // Silent — cached analysis is optional
+    }
+  }
 
   async function generateAIAnalysis() {
     setAiLoading(true);
@@ -114,6 +147,7 @@ export default function HeadToHeadPage() {
       }
       
       setAiAnalysis(data.analysis);
+      setAnalysisGeneratedAt(new Date().toISOString());
       toast({
         title: 'AI Analysis Complete',
         description: 'The comparison has been analyzed by AI.',
@@ -359,22 +393,36 @@ export default function HeadToHeadPage() {
                   <Sparkles className="h-5 w-5 text-primary" />
                   <CardTitle>AI-Powered Analysis</CardTitle>
                 </div>
-                <Button 
-                  onClick={generateAIAnalysis} 
-                  disabled={aiLoading || offers1.length === 0 || offers2.length === 0}
-                >
-                  {aiLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Analyzing...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="h-4 w-4 mr-2" />
-                      Generate Analysis
-                    </>
+                <div className="flex items-center gap-2">
+                  {analysisGeneratedAt && (
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      {new Date(analysisGeneratedAt).toLocaleDateString()} {new Date(analysisGeneratedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
                   )}
-                </Button>
+                  <Button 
+                    onClick={generateAIAnalysis} 
+                    disabled={aiLoading || offers1.length === 0 || offers2.length === 0}
+                    variant={aiAnalysis ? 'outline' : 'default'}
+                  >
+                    {aiLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Analyzing...
+                      </>
+                    ) : aiAnalysis ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Refresh Analysis
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-4 w-4 mr-2" />
+                        Generate Analysis
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
               <CardDescription>
                 Get intelligent insights comparing these providers using your configured LLM

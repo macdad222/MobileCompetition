@@ -10,7 +10,7 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   Smartphone, Apple, Loader2, Sparkles, ArrowRightLeft, DollarSign,
   Shield, Zap, Star, TrendingUp, Gift, ChevronRight, AlertTriangle,
-  CheckCircle2, XCircle, Phone, Wifi, Globe,
+  CheckCircle2, XCircle, Phone, Wifi, Globe, RefreshCw, Clock,
 } from 'lucide-react';
 
 interface Provider {
@@ -95,13 +95,46 @@ export default function MobileIntelligencePage() {
   const [loading, setLoading] = useState(true);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [providerAnalysis, setProviderAnalysis] = useState<any>(null);
+  const [providerAnalysisAt, setProviderAnalysisAt] = useState<string | null>(null);
   const [crossAnalysis, setCrossAnalysis] = useState<any>(null);
+  const [crossAnalysisAt, setCrossAnalysisAt] = useState<string | null>(null);
   const [analysisProvider, setAnalysisProvider] = useState<string>('');
   const [activeTab, setActiveTab] = useState<string>('plans');
 
   useEffect(() => {
-    Promise.all([fetchProviders(), fetchOffers(), fetchDeviceData()]).finally(() => setLoading(false));
+    Promise.all([fetchProviders(), fetchOffers(), fetchDeviceData()])
+      .finally(() => setLoading(false));
   }, []);
+
+  // Load cached analyses once providers are loaded
+  useEffect(() => {
+    if (providers.length > 0) {
+      fetchCachedCrossAnalysis();
+      providers.forEach(p => fetchCachedProviderMobileAnalysis(p.id));
+    }
+  }, [providers]);
+
+  async function fetchCachedCrossAnalysis() {
+    try {
+      const res = await fetch('/api/insights/cached?insightType=MOBILE_DEEP_ANALYSIS&category=cross-provider');
+      const data = await res.json();
+      if (data.insight?.content) {
+        setCrossAnalysis(data.insight.content);
+        setCrossAnalysisAt(data.insight.generatedAt);
+      }
+    } catch (error) { /* silent */ }
+  }
+
+  async function fetchCachedProviderMobileAnalysis(providerId: string) {
+    try {
+      const res = await fetch(`/api/insights/cached?insightType=MOBILE_DEEP_ANALYSIS&providerId=${providerId}`);
+      const data = await res.json();
+      if (data.insight?.content) {
+        setProviderAnalysis(data.insight.content);
+        setProviderAnalysisAt(data.insight.generatedAt);
+      }
+    } catch (error) { /* silent */ }
+  }
 
   async function fetchProviders() {
     try {
@@ -141,6 +174,7 @@ export default function MobileIntelligencePage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setProviderAnalysis(data.analysis);
+      setProviderAnalysisAt(new Date().toISOString());
       setActiveTab('analysis');
       toast({ title: 'Analysis Complete', description: 'Mobile deep analysis generated — see results below.' });
     } catch (e: any) {
@@ -162,6 +196,7 @@ export default function MobileIntelligencePage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setCrossAnalysis(data.analysis);
+      setCrossAnalysisAt(new Date().toISOString());
       setActiveTab('analysis');
       toast({ title: 'Analysis Complete', description: 'Cross-provider comparison ready — viewing results now.' });
     } catch (e: any) {
@@ -203,17 +238,28 @@ export default function MobileIntelligencePage() {
             Deep analysis of mobile plans, device deals, and switching incentives across providers
           </p>
         </div>
-        <Button
-          onClick={runCrossProviderAnalysis}
-          disabled={analysisLoading}
-          className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700"
-        >
-          {analysisLoading && analysisProvider === 'cross' ? (
-            <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Analyzing...</>
-          ) : (
-            <><Sparkles className="mr-2 h-4 w-4" />Cross-Provider Comparison</>
+        <div className="flex items-center gap-2">
+          {crossAnalysisAt && (
+            <span className="text-xs text-muted-foreground flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              {new Date(crossAnalysisAt).toLocaleDateString()} {new Date(crossAnalysisAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
           )}
-        </Button>
+          <Button
+            onClick={runCrossProviderAnalysis}
+            disabled={analysisLoading}
+            className={crossAnalysis ? '' : 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700'}
+            variant={crossAnalysis ? 'outline' : 'default'}
+          >
+            {analysisLoading && analysisProvider === 'cross' ? (
+              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Analyzing...</>
+            ) : crossAnalysis ? (
+              <><RefreshCw className="mr-2 h-4 w-4" />Refresh Cross-Provider</>
+            ) : (
+              <><Sparkles className="mr-2 h-4 w-4" />Cross-Provider Comparison</>
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Summary Stats */}

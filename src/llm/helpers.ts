@@ -39,6 +39,13 @@ export async function getLLMConfig(userId?: string): Promise<LLMClientConfig | n
   return null;
 }
 
+/**
+ * Store (or update) an AI-generated insight.
+ * Uses an upsert pattern: finds the most recent insight matching the same
+ * context keys (insightType + providerId + provider2Id + segmentId + category)
+ * and updates it in-place. Creates a new row only if no match exists.
+ * This keeps analyses persistent and shared — every user sees the same report.
+ */
 export async function storeInsight(params: {
   userId: string;
   insightType: InsightType;
@@ -53,6 +60,38 @@ export async function storeInsight(params: {
   category?: string;
   focusProviderId?: string;
 }) {
+  // Build context-key filter to find an existing insight for this exact context
+  const where: any = { insightType: params.insightType };
+  if (params.providerId) where.providerId = params.providerId; else where.providerId = null;
+  if (params.provider2Id) where.provider2Id = params.provider2Id; else where.provider2Id = null;
+  if (params.segmentId) where.segmentId = params.segmentId; else where.segmentId = null;
+  if (params.category) where.category = params.category; else where.category = null;
+
+  // Try to find an existing insight for this context
+  const existing = await db.storedInsight.findFirst({
+    where,
+    orderBy: { generatedAt: 'desc' },
+    select: { id: true },
+  });
+
+  if (existing) {
+    // Update in-place so we keep one row per context
+    return db.storedInsight.update({
+      where: { id: existing.id },
+      data: {
+        userId: params.userId,
+        title: params.title,
+        content: params.content as any,
+        summary: params.summary,
+        modelUsed: params.modelUsed,
+        tokensUsed: params.tokensUsed,
+        focusProviderId: params.focusProviderId,
+        generatedAt: new Date(),
+      },
+    });
+  }
+
+  // No existing insight — create a new one
   return db.storedInsight.create({
     data: {
       userId: params.userId,

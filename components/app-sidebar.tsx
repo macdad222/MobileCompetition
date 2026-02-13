@@ -16,6 +16,7 @@ import {
   Sparkles,
   Shield,
   Users,
+  Lightbulb,
 } from 'lucide-react';
 
 const navigation = [
@@ -30,6 +31,7 @@ const navigation = [
   { name: 'Head-to-Head', href: '/compare/head-to-head', icon: GitCompare },
   { name: 'Comcast Deep Dive', href: '/providers/comcast-business', icon: Sparkles },
   { name: 'Refresh Data', href: '/refresh', icon: RefreshCw },
+  { name: 'Dev Requests', href: '/dev-requests', icon: Lightbulb },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 

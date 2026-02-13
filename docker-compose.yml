@@ -8,7 +8,9 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/smb_intelligence?schema=public
       - AUTH_SECRET=${AUTH_SECRET:-dev-secret-change-in-production-abc123xyz789}
-      - AUTH_URL=http://localhost:3900
+      - AUTH_URL=${AUTH_URL:-http://192.168.5.56:3900}
+      - NEXTAUTH_URL_INTERNAL=http://localhost:3000
+      - AUTH_TRUST_HOST=true
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
       - NODE_ENV=development
       # Playwright needs this to find its browser binaries
@@ -19,6 +21,10 @@ services:
       - /app/.next
     # Shared memory for Chromium (prevents crashes in Docker)
     shm_size: '512mb'
+    # Explicit DNS servers to avoid Docker DNS flakiness with provider sites
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     depends_on:
       db:
         condition: service_healthy

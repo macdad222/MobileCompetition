@@ -31,6 +31,15 @@ export async function POST(req: Request) {
 
     const { providerIds, categories } = validated.data;
 
+    // Verify user still exists in the database (session may outlive a DB reset)
+    const userExists = await db.user.findUnique({ where: { id: session.user.id }, select: { id: true } });
+    if (!userExists) {
+      return NextResponse.json(
+        { error: 'Your session references a user that no longer exists. Please log out and log back in.' },
+        { status: 401 }
+      );
+    }
+
     // Create the job
     const jobId = await createRefreshJob({
       userId: session.user.id,

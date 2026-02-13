@@ -3,10 +3,13 @@ import { OfferCategory } from '@prisma/client';
 import { generateProviderDeviceIncentives, generateProviderBuyout } from '../device-seed-data';
 
 // Comcast Business source URLs
+// NOTE: business.comcast.com is a JavaScript SPA — requires Playwright for rendering.
+// The /learn/* pages serve speed info in HTML but pricing is loaded via JS.
+// /learn/bundles was removed (404 as of Feb 2026); bundles shown on /shop/offers.
 const COMCAST_URLS: Record<string, string> = {
   broadband: 'https://business.comcast.com/learn/internet',
   voice: 'https://business.comcast.com/learn/phone',
-  bundles: 'https://business.comcast.com/learn/bundles',
+  bundles: 'https://business.comcast.com/shop/offers',
   mobile: 'https://business.comcast.com/learn/mobile',
   devices: 'https://business.comcast.com/learn/mobile',
 };
@@ -252,6 +255,8 @@ export class ComcastBusinessCollector extends BaseCollector {
   providerSlug = 'comcast-business';
   supportedCategories: OfferCategory[] = ['BROADBAND', 'VOICE', 'MOBILE', 'PACKAGE'];
 
+  // Comcast Business is a JS-rendered SPA — requires Playwright
+  protected usePlaywright = true;
   protected contentZone = 'main, .learn-page-content, [role="main"]';
   protected contentSelectors: ContentSelectors = {
     BROADBAND: '.plan-card, [class*="pricing"], [class*="plan"]',

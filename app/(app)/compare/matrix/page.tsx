@@ -30,6 +30,8 @@ import {
   Award,
   Zap,
   Lightbulb,
+  RefreshCw,
+  Clock,
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
@@ -102,11 +104,29 @@ export default function MatrixComparePage() {
   // AI Insights
   const [aiInsights, setAiInsights] = useState<MarketInsights | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [insightsGeneratedAt, setInsightsGeneratedAt] = useState<string | null>(null);
 
   useEffect(() => {
     fetchOffers();
-    setAiInsights(null); // Clear insights when filters change
+    fetchCachedInsights();
   }, [selectedProviders, selectedCategories, minPrice, maxPrice, minSpeed, sortBy, sortOrder]);
+
+  async function fetchCachedInsights() {
+    try {
+      const cat = selectedCategories[0] || 'BROADBAND';
+      const res = await fetch(`/api/insights/cached?insightType=MARKET&category=${cat}`);
+      const data = await res.json();
+      if (data.insight?.content) {
+        setAiInsights(data.insight.content as MarketInsights);
+        setInsightsGeneratedAt(data.insight.generatedAt);
+      } else {
+        setAiInsights(null);
+        setInsightsGeneratedAt(null);
+      }
+    } catch (error) {
+      // Silent
+    }
+  }
 
   async function generateMarketInsights() {
     setAiLoading(true);
@@ -126,6 +146,7 @@ export default function MatrixComparePage() {
       }
       
       setAiInsights(data.analysis);
+      setInsightsGeneratedAt(new Date().toISOString());
       toast({
         title: 'Market Insights Generated',
         description: 'AI has analyzed the current market offerings.',
@@ -374,22 +395,36 @@ export default function MatrixComparePage() {
               <Sparkles className="h-5 w-5 text-primary" />
               <CardTitle>AI Market Insights</CardTitle>
             </div>
-            <Button 
-              onClick={generateMarketInsights} 
-              disabled={aiLoading || offers.length === 0}
-            >
-              {aiLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Analyzing Market...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  Generate Insights
-                </>
+            <div className="flex items-center gap-2">
+              {insightsGeneratedAt && (
+                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  {new Date(insightsGeneratedAt).toLocaleDateString()} {new Date(insightsGeneratedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
               )}
-            </Button>
+              <Button 
+                onClick={generateMarketInsights} 
+                disabled={aiLoading || offers.length === 0}
+                variant={aiInsights ? 'outline' : 'default'}
+              >
+                {aiLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Analyzing Market...
+                  </>
+                ) : aiInsights ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Refresh Insights
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Generate Insights
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
           <CardDescription>
             Get AI-powered analysis of the current market offerings

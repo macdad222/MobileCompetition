@@ -22,6 +22,7 @@ import {
   Users,
   Building2,
   Briefcase,
+  RefreshCw,
 } from 'lucide-react';
 import { ReportGenerator } from '@/components/export/report-generator';
 
@@ -66,13 +67,17 @@ export default function StrategyPage() {
   // Executive Summary state
   const [execSummary, setExecSummary] = useState<ExecutiveSummary | null>(null);
   const [execLoading, setExecLoading] = useState(false);
+  const [execGeneratedAt, setExecGeneratedAt] = useState<string | null>(null);
 
   // Competitive Intel state
   const [compIntel, setCompIntel] = useState<CompetitiveIntel | null>(null);
   const [compLoading, setCompLoading] = useState(false);
+  const [compGeneratedAt, setCompGeneratedAt] = useState<string | null>(null);
 
   useEffect(() => {
     fetchData();
+    fetchCachedExecSummary();
+    fetchCachedCompIntel();
   }, []);
 
   async function fetchData() {
@@ -93,6 +98,28 @@ export default function StrategyPage() {
     }
   }
 
+  async function fetchCachedExecSummary() {
+    try {
+      const res = await fetch('/api/insights/cached?insightType=EXECUTIVE_SUMMARY');
+      const data = await res.json();
+      if (data.insight?.content) {
+        setExecSummary(data.insight.content as ExecutiveSummary);
+        setExecGeneratedAt(data.insight.generatedAt);
+      }
+    } catch (error) { /* silent */ }
+  }
+
+  async function fetchCachedCompIntel() {
+    try {
+      const res = await fetch('/api/insights/cached?insightType=COMPETITIVE_INTEL');
+      const data = await res.json();
+      if (data.insight?.content) {
+        setCompIntel(data.insight.content as CompetitiveIntel);
+        setCompGeneratedAt(data.insight.generatedAt);
+      }
+    } catch (error) { /* silent */ }
+  }
+
   async function generateExecSummary() {
     setExecLoading(true);
     try {
@@ -103,6 +130,7 @@ export default function StrategyPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setExecSummary(data.analysis);
+      setExecGeneratedAt(new Date().toISOString());
       fetchData(); // Refresh insights list
     } catch (error) {
       toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to generate', variant: 'destructive' });
@@ -122,6 +150,7 @@ export default function StrategyPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setCompIntel(data.analysis);
+      setCompGeneratedAt(new Date().toISOString());
       fetchData();
     } catch (error) {
       toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to generate', variant: 'destructive' });
@@ -200,10 +229,19 @@ export default function StrategyPage() {
               onClick={!execLoading ? generateExecSummary : undefined}>
           <CardHeader className="pb-3">
             <div className="flex items-center gap-2">
-              {execLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Briefcase className="h-5 w-5 text-purple-600" />}
-              <CardTitle className="text-lg">Executive Briefing</CardTitle>
+              {execLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : execSummary ? <RefreshCw className="h-5 w-5 text-purple-600" /> : <Briefcase className="h-5 w-5 text-purple-600" />}
+              <CardTitle className="text-lg">{execSummary ? 'Refresh' : ''} Executive Briefing</CardTitle>
             </div>
-            <CardDescription>Generate a board-ready strategic summary</CardDescription>
+            <CardDescription>
+              {execGeneratedAt ? (
+                <span className="flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  Last generated {new Date(execGeneratedAt).toLocaleDateString()} {new Date(execGeneratedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              ) : (
+                'Generate a board-ready strategic summary'
+              )}
+            </CardDescription>
           </CardHeader>
         </Card>
 
@@ -211,10 +249,19 @@ export default function StrategyPage() {
               onClick={!compLoading ? generateCompIntel : undefined}>
           <CardHeader className="pb-3">
             <div className="flex items-center gap-2">
-              {compLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Shield className="h-5 w-5 text-red-600" />}
-              <CardTitle className="text-lg">Competitive Intel</CardTitle>
+              {compLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : compIntel ? <RefreshCw className="h-5 w-5 text-red-600" /> : <Shield className="h-5 w-5 text-red-600" />}
+              <CardTitle className="text-lg">{compIntel ? 'Refresh' : ''} Competitive Intel</CardTitle>
             </div>
-            <CardDescription>Analyze competitive positioning</CardDescription>
+            <CardDescription>
+              {compGeneratedAt ? (
+                <span className="flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  Last generated {new Date(compGeneratedAt).toLocaleDateString()} {new Date(compGeneratedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              ) : (
+                'Analyze competitive positioning'
+              )}
+            </CardDescription>
           </CardHeader>
         </Card>
 

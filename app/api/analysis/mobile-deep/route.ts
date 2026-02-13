@@ -177,6 +177,7 @@ export async function POST(req: Request) {
         content: result,
         summary: result.marketOverview,
         modelUsed: llmConfig.model,
+        category: 'cross-provider',
       });
 
       return NextResponse.json({ analysis: result });

@@ -147,38 +147,61 @@ export abstract class BaseCollector implements ProviderCollector {
   // ============================================================================
 
   /**
-   * Simple HTTP fetch — fast, works for most provider sites that serve
+   * Simple HTTP fetch with retry — works for most provider sites that serve
    * server-rendered HTML. This is the default method.
+   *
+   * Uses cache: 'no-store' to bypass Next.js 14.2.x's fetch patching which
+   * adds caching/revalidation that can cause external URLs to hang.
    */
   protected async fetchPage(url: string): Promise<string> {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
+    const maxRetries = 2;
+    let lastError: Error | null = null;
 
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Accept-Encoding': 'gzip, deflate',
-          'Cache-Control': 'no-cache',
-        },
-        signal: controller.signal,
-      });
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const timeoutMs = attempt === 0 ? 45000 : 60000;
+        const start = Date.now();
 
-      clearTimeout(timeout);
+        console.log(`[${this.providerSlug}] fetch attempt ${attempt + 1}/${maxRetries + 1} for ${url} (timeout ${timeoutMs / 1000}s)`);
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const response = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Cache-Control': 'no-cache',
+          },
+          signal: AbortSignal.timeout(timeoutMs),
+          redirect: 'follow',
+          cache: 'no-store' as RequestCache,
+          // @ts-ignore — Next.js-specific option to disable data cache
+          next: { revalidate: 0 },
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const text = await response.text();
+        const elapsed = Date.now() - start;
+        console.log(`[${this.providerSlug}] fetch OK: ${text.length} chars in ${elapsed}ms from ${response.url}`);
+        return text;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'Unknown error';
+        const isTimeout = msg.includes('timeout') || msg.includes('aborted') || (error instanceof Error && error.name === 'TimeoutError');
+        lastError = new Error(isTimeout ? `Timeout fetching ${url}` : `Failed to fetch ${url}: ${msg}`);
+
+        if (attempt < maxRetries) {
+          const delay = (attempt + 1) * 3000;
+          console.log(`[${this.providerSlug}] Fetch attempt ${attempt + 1} failed for ${url}: ${lastError.message}, retrying in ${delay / 1000}s...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        } else {
+          console.log(`[${this.providerSlug}] All ${maxRetries + 1} attempts failed for ${url}: ${lastError.message}`);
+        }
       }
-
-      return await response.text();
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error(`Timeout fetching ${url}`);
-      }
-      throw new Error(`Failed to fetch ${url}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+
+    throw lastError!;
   }
 
   /**

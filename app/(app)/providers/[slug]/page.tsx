@@ -121,13 +121,32 @@ export default function ProviderDetailPage() {
   const [activeTab, setActiveTab] = useState('BROADBAND');
   const [aiAnalysis, setAiAnalysis] = useState<ProviderAnalysis | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [analysisGeneratedAt, setAnalysisGeneratedAt] = useState<string | null>(null);
 
   useEffect(() => {
     if (slug) {
       fetchProvider();
-      setAiAnalysis(null);
+      fetchCachedAnalysis();
     }
   }, [slug]);
+
+  async function fetchCachedAnalysis() {
+    try {
+      // We need the provider ID for the cache lookup — get it from the API
+      const provRes = await fetch(`/api/providers/${slug}`);
+      const provData = await provRes.json();
+      if (!provData.provider?.id) return;
+
+      const res = await fetch(`/api/insights/cached?insightType=PROVIDER&providerId=${provData.provider.id}`);
+      const data = await res.json();
+      if (data.insight?.content) {
+        setAiAnalysis(data.insight.content as ProviderAnalysis);
+        setAnalysisGeneratedAt(data.insight.generatedAt);
+      }
+    } catch (error) {
+      // Silent — cached analysis is optional
+    }
+  }
 
   async function generateProviderAnalysis() {
     setAiLoading(true);
@@ -145,6 +164,7 @@ export default function ProviderDetailPage() {
       }
       
       setAiAnalysis(data.analysis);
+      setAnalysisGeneratedAt(new Date().toISOString());
       toast({
         title: 'Provider Analysis Complete',
         description: 'AI has analyzed this provider.',
@@ -351,22 +371,36 @@ export default function ProviderDetailPage() {
               <Sparkles className="h-5 w-5 text-primary" />
               <CardTitle>AI Provider Analysis</CardTitle>
             </div>
-            <Button 
-              onClick={generateProviderAnalysis} 
-              disabled={aiLoading || !stats?.totalOffers}
-            >
-              {aiLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Analyzing...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  Generate Analysis
-                </>
+            <div className="flex items-center gap-2">
+              {analysisGeneratedAt && (
+                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  {new Date(analysisGeneratedAt).toLocaleDateString()} {new Date(analysisGeneratedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
               )}
-            </Button>
+              <Button 
+                onClick={generateProviderAnalysis} 
+                disabled={aiLoading || !stats?.totalOffers}
+                variant={aiAnalysis ? 'outline' : 'default'}
+              >
+                {aiLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Analyzing...
+                  </>
+                ) : aiAnalysis ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Refresh Analysis
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Generate Analysis
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
           <CardDescription>
             Get AI-powered competitive analysis of {provider.displayName}

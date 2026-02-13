@@ -205,6 +205,7 @@ export async function POST(req: Request) {
         content: comparison,
         summary: comparison.marketOverview,
         modelUsed: config.model,
+        category: 'cross-provider',
       });
 
       return NextResponse.json({ comparison });

@@ -47,8 +47,7 @@ export default async function DashboardPage() {
         displayName: true,
         _count: { select: { offers: { where: { isActive: true } } } },
       },
-      orderBy: { displayName: 'asc' },
-      take: 5,
+      orderBy: { priorityRank: 'asc' },
     }),
     db.appSettings.findUnique({
       where: { id: 'global' },

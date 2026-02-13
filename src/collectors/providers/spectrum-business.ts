@@ -3,12 +3,15 @@ import { OfferCategory } from '@prisma/client';
 import { generateProviderDeviceIncentives, generateProviderBuyout } from '../device-seed-data';
 
 // Spectrum Business source URLs
+// NOTE: business.spectrum.com redirects to www.spectrum.com/business/* (updated Feb 2026).
+// Using canonical www.spectrum.com URLs directly avoids redirect hops.
+// These pages serve server-rendered HTML with pricing data — simple fetch works.
 const SPECTRUM_URLS: Record<string, string> = {
-  broadband: 'https://business.spectrum.com/internet',
-  voice: 'https://business.spectrum.com/voice',
-  mobile: 'https://business.spectrum.com/mobile',
-  packages: 'https://business.spectrum.com/bundles',
-  devices: 'https://business.spectrum.com/mobile',
+  broadband: 'https://www.spectrum.com/business/internet',
+  voice: 'https://www.spectrum.com/business/phone',
+  mobile: 'https://www.spectrum.com/business/mobile',
+  packages: 'https://www.spectrum.com/business/bundles',
+  devices: 'https://www.spectrum.com/business/mobile',
 };
 
 const CATEGORY_URL_MAP: Record<string, string> = {
