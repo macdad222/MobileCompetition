@@ -12,8 +12,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { LogOut, Settings, User as UserIcon, Menu } from 'lucide-react';
+import { LogOut, Settings, User as UserIcon } from 'lucide-react';
 import Link from 'next/link';
+import { MobileNav } from '@/components/mobile-nav';
 
 interface AppHeaderProps {
   user: User;
@@ -31,9 +32,7 @@ export function AppHeader({ user }: AppHeaderProps) {
   return (
     <header className="sticky top-0 z-40 flex h-16 items-center justify-between gap-4 border-b bg-white px-6">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" className="lg:hidden">
-          <Menu className="h-5 w-5" />
-        </Button>
+        <MobileNav />
         <h1 className="text-lg font-semibold text-slate-900">
           SMB Market Intelligence
         </h1>

@@ -8,7 +8,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/smb_intelligence?schema=public
       - AUTH_SECRET=${AUTH_SECRET:-dev-secret-change-in-production-abc123xyz789}
-      - AUTH_URL=${AUTH_URL:-http://192.168.5.56:3900}
+      - AUTH_URL=${AUTH_URL:-https://smb.cmaclab.com}
       - NEXTAUTH_URL_INTERNAL=http://localhost:3000
       - AUTH_TRUST_HOST=true
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}

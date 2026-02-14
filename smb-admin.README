@@ -1,0 +1,75 @@
+SMB Market Intel — Admin CLI Tool
+===================================
+
+A simple command-line utility for checking user registrations,
+activity, data status, and more — directly from your server terminal.
+
+Prerequisites
+-------------
+- Docker containers must be running (docker compose up -d)
+- Run from the MobileCompetition project directory
+
+
+Usage
+-----
+  ./smb-admin.sh <command>
+
+
+Available Commands
+------------------
+
+  users       List all registered users with their signup dates
+              and a total count.
+
+  activity    Show each user's activity: how many data refreshes
+              and AI analyses they've run, plus when they were
+              last active.
+
+  signups     Show new user signups grouped by day — useful for
+              tracking growth over time.
+
+  insights    Summary of all AI-generated analyses by type
+              (Provider, Market, Comparison, etc.) with counts
+              and the most recent generation date.
+
+  requests    List all development requests submitted by users
+              through the Dev Requests page, including who
+              submitted them and their current status.
+
+  data        Show each provider's offer count and when their
+              data was last updated — handy for checking if a
+              refresh is needed.
+
+  stats       One-line overview: total users, providers, offers,
+              insights, and dev requests.
+
+  help        Show the built-in help message.
+
+
+Examples
+--------
+
+  # Quick health check
+  ./smb-admin.sh stats
+
+  # See who signed up today
+  ./smb-admin.sh signups
+
+  # Check if anyone is actively using the tool
+  ./smb-admin.sh activity
+
+  # See if provider data is stale
+  ./smb-admin.sh data
+
+  # Check feature requests from the team
+  ./smb-admin.sh requests
+
+
+Notes
+-----
+- All queries run against the PostgreSQL container
+  (mobilecompetition-db-1) via docker exec.
+- No data is modified — every command is read-only.
+- If the containers aren't running you'll see a connection error;
+  just start them with: docker compose up -d
+
